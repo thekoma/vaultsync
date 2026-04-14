@@ -31,6 +31,7 @@ MUTATE_SKIP_RE = re.compile(
 )
 
 DEFAULT_ANNOTATION_KEY = "vaultsync/watch"
+DEFAULT_TRIGGER_KEY = "vaultsync/trigger"
 
 
 def extract_vault_paths(text: str) -> List[str]:
@@ -240,7 +241,34 @@ def annotate_values_file(doc: str, desired: str, annotation_key: str) -> Tuple[s
     return "\n".join(new_lines), changed, found_bankvaults_block
 
 
-def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> Tuple[str, bool, List[str]]:
+def ensure_trigger_annotation(doc: str, trigger_key: str) -> Tuple[str, bool]:
+    """Add trigger annotation (empty value) next to every watch annotation.
+
+    For ArgoCD to "own" the trigger field, it must be in the rendered manifest.
+    This adds 'vaultsync/trigger: ""' on the line after every vaultsync/watch
+    if not already present.
+    Returns (modified_doc, was_changed).
+    """
+    escaped_trigger = re.escape(trigger_key)
+    if re.search(rf"^\s+{escaped_trigger}:", doc, re.MULTILINE):
+        return doc, False  # already present
+
+    escaped_watch = re.escape(DEFAULT_ANNOTATION_KEY)
+    # Find every watch annotation line and insert trigger after it
+    lines = doc.split("\n")
+    new_lines = []
+    changed = False
+    for line in lines:
+        new_lines.append(line)
+        m = re.match(rf'^(\s+){escaped_watch}:\s', line)
+        if m:
+            indent = m.group(1)
+            new_lines.append(f'{indent}{trigger_key}: ""')
+            changed = True
+    return "\n".join(new_lines), changed
+
+
+def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY, trigger_key: str = DEFAULT_TRIGGER_KEY) -> Tuple[str, bool, List[str]]:
     """Process a single YAML document.
 
     Returns (possibly_modified_doc, was_changed, unhandled_paths).
@@ -256,28 +284,36 @@ def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> 
         return doc, False, []
 
     desired = ",".join(paths)
+    changed = False
 
     # Case 1: Kubernetes manifest — annotate metadata.annotations as before
     if is_k8s_manifest(doc):
         current = find_annotation_value(doc, annotation_key)
-        if current == desired:
-            return doc, False, []
-        new_doc = add_or_update_annotation(doc, desired, annotation_key)
-        return new_doc, True, []
+        if current != desired:
+            doc = add_or_update_annotation(doc, desired, annotation_key)
+            changed = True
+        # Ensure trigger annotation exists alongside watch
+        doc, trigger_changed = ensure_trigger_annotation(doc, trigger_key)
+        changed = changed or trigger_changed
+        if changed:
+            return doc, True, []
+        return doc, False, []
 
     # Case 2: Non-manifest (values file) — annotate Bank-Vaults annotation blocks
-    new_doc, changed, had_blocks = annotate_values_file(doc, desired, annotation_key)
-    if changed:
-        return new_doc, True, []
+    doc, values_changed, had_blocks = annotate_values_file(doc, desired, annotation_key)
     if had_blocks:
-        # Bank-Vaults blocks exist and already have the annotation — all good
+        # Also ensure trigger annotation in values files
+        doc, trigger_changed = ensure_trigger_annotation(doc, trigger_key)
+        changed = values_changed or trigger_changed
+        if changed:
+            return doc, True, []
         return doc, False, []
 
     # Case 3: Non-manifest with no Bank-Vaults annotation blocks — warn
     return doc, False, paths
 
 
-def process_file(filepath: str, check: bool, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> bool:
+def process_file(filepath: str, check: bool, annotation_key: str = DEFAULT_ANNOTATION_KEY, trigger_key: str = DEFAULT_TRIGGER_KEY) -> bool:
     """Process a single file.  Returns True if changes were made / needed."""
     try:
         with open(filepath, "r") as f:
@@ -297,7 +333,7 @@ def process_file(filepath: str, check: bool, annotation_key: str = DEFAULT_ANNOT
         if re.match(r"^---\s*$", part):
             new_parts.append(part)
             continue
-        new_doc, doc_changed, unhandled = process_document(part, annotation_key)
+        new_doc, doc_changed, unhandled = process_document(part, annotation_key, trigger_key)
         if doc_changed:
             changed = True
         if unhandled:
@@ -393,6 +429,11 @@ exit codes:
         default=DEFAULT_ANNOTATION_KEY,
         help=f"Annotation key to use for vault watch (default: {DEFAULT_ANNOTATION_KEY}).",
     )
+    parser.add_argument(
+        "--trigger-annotation",
+        default=DEFAULT_TRIGGER_KEY,
+        help=f"Annotation key for the drift trigger (default: {DEFAULT_TRIGGER_KEY}).",
+    )
     parser.add_argument("files", nargs="*", help="YAML files to process.")
     args = parser.parse_args()
 
@@ -401,7 +442,7 @@ exit codes:
 
     any_changed = False
     for filepath in args.files:
-        if process_file(filepath, check=args.check, annotation_key=args.watch_annotation):
+        if process_file(filepath, check=args.check, annotation_key=args.watch_annotation, trigger_key=args.trigger_annotation):
             any_changed = True
 
     return 1 if any_changed else 0
