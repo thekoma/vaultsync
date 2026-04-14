@@ -1,6 +1,0 @@
-# Add this role to vault.yaml externalConfig.auth[0].roles:
-# - name: vaultsync
-#   bound_service_account_names: ["vaultsync"]
-#   bound_service_account_namespaces: ["vaultsync"]
-#   policies: allow_secrets
-#   ttl: 1h
