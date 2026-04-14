@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Pre-commit hook that auto-adds vaultsync/watch annotations.
 
-Scans YAML files for vault:secret/data/... patterns and adds/updates the
-vaultsync/watch annotation on each document's metadata so the vaultSync
-controller knows which secrets to watch.
+Scans YAML files for vault:MOUNT/data/PATH#key patterns and adds/updates
+the vaultsync/watch annotation on each document's metadata so the vaultSync
+controller knows which secrets to watch. Works with any Vault KV v2 mount
+name (secret, kv, custom-mount, etc.).
 
 Usage:
     vaultsync_annotate.py [--check] FILE [FILE ...]
@@ -19,8 +20,9 @@ import re
 import sys
 from typing import List, Optional, Tuple
 
-# Pattern: vault:secret/data/PATH#key  or  ${vault:secret/data/PATH#key}
-VAULT_REF_RE = re.compile(r"""\$?\{?vault:secret/data/([^#\}"'\s]+)#[^}"'\s]+""")
+# Pattern: vault:MOUNT/data/PATH#key  or  ${vault:MOUNT/data/PATH#key}
+# Captures the full path including mount (e.g., "secret/data/litellm", "kv/data/myapp")
+VAULT_REF_RE = re.compile(r"""\$?\{?vault:([^#\}"'\s]+/data/[^#\}"'\s]+)#[^}"'\s]+""")
 
 # Detect the "mutate: skip" annotation (uncommented)
 MUTATE_SKIP_RE = re.compile(
@@ -32,10 +34,14 @@ ANNOTATION_KEY = "vaultsync/watch"
 
 
 def extract_vault_paths(text: str) -> List[str]:
-    """Return sorted, deduplicated vault paths found in *text*."""
+    """Return sorted, deduplicated vault paths found in *text*.
+
+    Captures the full mount/data/path (e.g., 'secret/data/litellm',
+    'kv/data/myapp') so the annotation works with any KV v2 mount name.
+    """
     paths = set()
     for m in VAULT_REF_RE.finditer(text):
-        paths.add("secret/data/" + m.group(1))
+        paths.add(m.group(1))
     return sorted(paths)
 
 
