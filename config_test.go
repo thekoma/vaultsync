@@ -11,7 +11,7 @@ func clearEnv(t *testing.T) {
 	for _, key := range []string{
 		"VAULT_ADDR", "VAULT_ROLE", "VAULT_MOUNT", "VAULT_AUTH_MOUNT",
 		"VAULT_SKIP_VERIFY", "POLL_INTERVAL", "STATE_NAMESPACE",
-		"STATE_CONFIGMAP", "DRY_RUN", "LOG_LEVEL",
+		"STATE_CONFIGMAP", "ARGOCD_NAMESPACE", "DRY_RUN", "LOG_LEVEL",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -37,6 +37,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("POLL_INTERVAL", "30s")
 	t.Setenv("STATE_NAMESPACE", "ops")
 	t.Setenv("STATE_CONFIGMAP", "my-state")
+	t.Setenv("ARGOCD_NAMESPACE", "argo-system")
 	t.Setenv("DRY_RUN", "true")
 	t.Setenv("LOG_LEVEL", "debug")
 
@@ -68,6 +69,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.StateConfigMap != "my-state" {
 		t.Errorf("StateConfigMap = %q, want %q", cfg.StateConfigMap, "my-state")
+	}
+	if cfg.ArgoCDNamespace != "argo-system" {
+		t.Errorf("ArgoCDNamespace = %q, want %q", cfg.ArgoCDNamespace, "argo-system")
 	}
 	if !cfg.DryRun {
 		t.Error("DryRun = false, want true")
@@ -107,6 +111,9 @@ func TestLoadConfigDefaultValues(t *testing.T) {
 	}
 	if cfg.StateConfigMap != "vaultsync-state" {
 		t.Errorf("StateConfigMap = %q, want %q", cfg.StateConfigMap, "vaultsync-state")
+	}
+	if cfg.ArgoCDNamespace != "argocd" {
+		t.Errorf("ArgoCDNamespace = %q, want %q", cfg.ArgoCDNamespace, "argocd")
 	}
 	if cfg.DryRun {
 		t.Error("DryRun = true, want false")

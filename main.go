@@ -71,7 +71,7 @@ func main() {
 
 	// 6. Create all components.
 	state := NewStateStore(k8sClient, *cfg, logger)
-	discovery := NewDiscovery(k8sClient, dynClient, logger)
+	discovery := NewDiscovery(k8sClient, dynClient, cfg.ArgoCDNamespace, logger)
 	refresher := NewRefresher(k8sClient, dynClient, *cfg, logger)
 	controller := NewController(vault, state, discovery, refresher, logger)
 
