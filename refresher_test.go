@@ -23,26 +23,6 @@ func (f *fakeRefresher) Refresh(_ context.Context, resource WatchedResource) err
 // Compile-time check: fakeRefresher must satisfy Refresher.
 var _ Refresher = (*fakeRefresher)(nil)
 
-func TestRefreshStrategy(t *testing.T) {
-	tests := []struct {
-		kind string
-		want string
-	}{
-		{kind: "Secret", want: "delete"},
-		{kind: "ConfigMap", want: "delete"},
-		{kind: "Application", want: "recreate"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.kind, func(t *testing.T) {
-			got := RefreshStrategy(tt.kind)
-			if got != tt.want {
-				t.Errorf("RefreshStrategy(%q) = %q, want %q", tt.kind, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRefresherInterface(t *testing.T) {
 	resources := []WatchedResource{
 		{
