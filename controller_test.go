@@ -192,12 +192,9 @@ func TestReconcileNoChanges(t *testing.T) {
 		t.Fatalf("refreshed %d resources, want 0; got %+v", len(refresher.refreshed), refresher.refreshed)
 	}
 
-	// State should still be saved with current versions.
-	if !state.saved {
-		t.Error("state was not saved")
-	}
-	if state.versions["litellm"] != 3 {
-		t.Errorf("state[litellm] = %d, want 3", state.versions["litellm"])
+	// State should NOT be saved when nothing changed (avoids unnecessary API writes).
+	if state.saved {
+		t.Error("state was saved unnecessarily")
 	}
 }
 
