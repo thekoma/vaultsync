@@ -108,6 +108,79 @@ helm install vaultsync charts/vaultsync \
   --namespace vaultsync --create-namespace
 ```
 
+## Vault Prerequisites
+
+vaultSync authenticates to Vault via the [Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes). You need to configure three things in Vault before deploying:
+
+### 1. Enable Kubernetes auth (if not already enabled)
+
+```bash
+vault auth enable kubernetes
+
+vault write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc:443"
+```
+
+### 2. Create a policy granting read access to secret metadata
+
+vaultSync only reads **metadata** (version numbers), never the secret values themselves. However, Vault's KV v2 API requires the `read` capability on the metadata path and `list` for recursive discovery.
+
+```bash
+vault policy write vaultsync-policy - <<EOF
+# List and read metadata for all secrets (no access to actual values)
+path "secret/metadata/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+```
+
+> **Note:** If you want to use a broader existing policy (e.g., `allow_secrets` that grants full CRUD), that works too. vaultSync will never write to or read the actual secret data — only metadata.
+
+### 3. Create a Kubernetes auth role for the vaultSync service account
+
+```bash
+vault write auth/kubernetes/role/vaultsync \
+  bound_service_account_names=vaultsync \
+  bound_service_account_namespaces=vaultsync \
+  policies=vaultsync-policy \
+  ttl=1h
+```
+
+The service account name and namespace must match the Helm release. With default values, both are `vaultsync`.
+
+### Bank-Vaults operator
+
+If you use the [Bank-Vaults operator](https://bank-vaults.dev/), add the role to your `Vault` CR's `externalConfig`:
+
+```yaml
+spec:
+  externalConfig:
+    policies:
+      - name: vaultsync-policy
+        rules: path "secret/metadata/*" {
+          capabilities = ["read", "list"]
+          }
+    auth:
+      - type: kubernetes
+        roles:
+          - name: vaultsync
+            bound_service_account_names: ["vaultsync"]
+            bound_service_account_namespaces: ["vaultsync"]
+            policies: vaultsync-policy
+            ttl: 1h
+```
+
+### Verify the setup
+
+After deploying vaultSync, check the logs to confirm authentication:
+
+```bash
+kubectl logs -n vaultsync deployment/vaultsync | head -5
+# Expected: "authenticated to vault"
+```
+
+If you see `invalid role name "vaultsync"`, the Vault role hasn't been created yet. If you see `permission denied`, check the policy bindings.
+
 ## Configuration
 
 All configuration is via Helm values (which map to environment variables):
@@ -153,19 +226,6 @@ annotations:
 ```
 
 The `secret/data/` prefix is automatically stripped if present.
-
-### Vault role configuration
-
-The vaultSync service account needs a Vault Kubernetes auth role with read access to the watched paths:
-
-```yaml
-# Add to your Vault configuration (e.g. vault-operator externalConfig)
-- name: vaultsync
-  bound_service_account_names: ["vaultsync"]
-  bound_service_account_namespaces: ["vaultsync"]
-  policies: allow_secrets
-  ttl: 1h
-```
 
 ## How the Refresh Works
 
