@@ -209,7 +209,7 @@ All configuration is via Helm values (which map to environment variables):
 
 ### Opting a resource into vaultSync
 
-Add the `vaultsync/watch` annotation to any Secret, ConfigMap, or ArgoCD Application:
+Add **both** annotations to any Secret, ConfigMap, or ArgoCD Application:
 
 ```yaml
 apiVersion: v1
@@ -218,27 +218,59 @@ metadata:
   name: my-app-secret
   annotations:
     vaultsync/watch: "apps/my-app/config"
+    vaultsync/trigger: ""
 ```
 
-The annotation value is a comma-separated list of Vault KV v2 paths (relative to the configured mount):
+- `vaultsync/watch` tells vaultSync which Vault paths to monitor for this resource
+- `vaultsync/trigger: ""` is a placeholder that vaultSync will patch with a timestamp when a change is detected (see [Why both annotations?](#why-both-annotations) below)
+
+The watch value is a comma-separated list of Vault KV v2 paths (relative to the configured mount):
 
 ```yaml
 annotations:
   vaultsync/watch: "apps/my-app/config, apps/my-app/certs"
+  vaultsync/trigger: ""
 ```
 
 The `secret/data/` prefix is automatically stripped if present.
+
+> **Tip:** The [pre-commit hook](#pre-commit-hook) adds both annotations automatically.
 
 ## How the Refresh Works
 
 1. **Poll**: vaultSync calls Vault's `GET /v1/secret/metadata/:path` for every path discovered across annotated resources.
 2. **Diff**: The current version from Vault metadata is compared against the version stored in the state ConfigMap. If they differ, the path is marked as changed.
 3. **Patch**: For each resource watching a changed path, vaultSync sends a JSON merge-patch setting `metadata.annotations["vaultsync/trigger"]` to the current UTC timestamp.
-4. **selfHeal**: ArgoCD detects the annotation as drift (it is not in the git manifest) and re-applies the resource from git, which removes the trigger annotation.
+4. **selfHeal**: ArgoCD detects that the trigger annotation value differs from what's in the git manifest (`""` vs the timestamp) and re-applies the resource from git, resetting the trigger back to `""`.
 5. **Webhook**: During re-application, the Bank-Vaults admission webhook intercepts the resource and fetches the current secret values from Vault, injecting them into the resource.
 6. **State update**: vaultSync persists the new version to the state ConfigMap so the same change is not processed again.
 
 The net effect: secrets in Vault rotate, and within one poll interval, all annotated resources are refreshed with the new values -- without any pod restarts, manual intervention, or destructive operations.
+
+### Why both annotations?
+
+ArgoCD uses a **3-way diff** to compare the desired state (rendered manifest from git/Helm) against the live state. It only tracks fields that it "owns" -- fields present in the desired state.
+
+If `vaultsync/trigger` were only added at runtime (not in the manifest), ArgoCD would treat it as an unmanaged field and **ignore it completely**. selfHeal would never fire.
+
+By including `vaultsync/trigger: ""` in the manifest committed to git, ArgoCD owns the field. When vaultSync patches it to a timestamp, ArgoCD sees the difference (`""` vs `"2026-04-15T00:15:00Z"`) and triggers selfHeal to restore the desired state.
+
+```mermaid
+sequenceDiagram
+    participant G as Git Manifest
+    participant A as ArgoCD
+    participant K as K8s Resource
+    participant VS as vaultSync
+
+    G->>A: trigger: ""
+    A->>K: Apply (trigger: "")
+    Note over VS: Vault secret changed!
+    VS->>K: Patch trigger: "2026-04-15T..."
+    A->>A: 3-way diff: "" ≠ "2026-04-15T..."
+    A->>K: selfHeal → re-apply from git
+    Note over K: trigger reset to ""
+    Note over K: Webhook re-injects new values
+```
 
 ## FluxCD Compatibility
 
