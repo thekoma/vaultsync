@@ -1,0 +1,7 @@
+- id: vaultsync-annotate
+  name: vaultsync-annotate
+  description: Auto-add vaultsync/watch annotations to resources with vault:secret/data/ references
+  entry: hooks/vaultsync_annotate.py
+  language: script
+  types: [yaml]
+  args: []
