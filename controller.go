@@ -96,10 +96,14 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	// Step 5: Detect changes.
 	changed := DetectChanges(storedVersions, currentVersions)
 
-	// Step 6: If no changes, save current versions and return.
+	// Step 6: If no changes, merge current versions into stored state and return.
+	// We merge (not overwrite) to preserve state for paths that are no longer watched.
 	if len(changed) == 0 {
 		c.logger.Info("no vault secret changes detected")
-		if err := c.state.Save(ctx, currentVersions); err != nil {
+		for k, v := range currentVersions {
+			storedVersions[k] = v
+		}
+		if err := c.state.Save(ctx, storedVersions); err != nil {
 			return fmt.Errorf("saving state: %w", err)
 		}
 		c.markSuccess()

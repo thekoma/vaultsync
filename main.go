@@ -64,20 +64,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5. Create Vault watcher.
-	vault, err := NewVaultWatcher(*cfg, logger)
+	// 5. Signal handling (needed early for vault init context).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// 6. Create Vault watcher.
+	vault, err := NewVaultWatcher(ctx, *cfg, logger)
 	if err != nil {
 		logger.Error("failed to create vault watcher", "error", err)
 		os.Exit(1)
 	}
 
-	// 6. Create all components.
+	// 7. Create all components.
 	state := NewStateStore(k8sClient, *cfg, logger)
 	discovery := NewDiscovery(k8sClient, dynClient, cfg.ArgoCDNamespace, logger)
 	refresher := NewRefresher(k8sClient, dynClient, *cfg, logger)
 	controller := NewController(vault, state, discovery, refresher, logger)
 
-	// 7. Start health server.
+	// 8. Start health server.
 	healthMux := http.NewServeMux()
 	livenessThreshold := 3 * cfg.PollInterval
 	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -107,10 +111,6 @@ func main() {
 		}
 	}()
 
-	// 8. Signal handling.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	// 9. Poll loop — reconcile immediately, then on each tick.
 	// Use exponential backoff on consecutive failures to avoid hammering
 	// a down Vault or K8s API.
@@ -137,6 +137,9 @@ func main() {
 		select {
 		case <-ctx.Done():
 			logger.Info("shutting down")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			healthServer.Shutdown(shutdownCtx)
 			return
 		case <-ticker.C:
 			if err := controller.Reconcile(ctx); err != nil {

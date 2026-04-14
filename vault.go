@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	vault "github.com/hashicorp/vault/api"
 	kubeauth "github.com/hashicorp/vault/api/auth/kubernetes"
@@ -38,7 +39,7 @@ type vaultWatcher struct {
 
 // NewVaultWatcher creates a new VaultWatcher that connects to Vault using
 // Kubernetes auth and polls KV v2 metadata.
-func NewVaultWatcher(cfg Config, logger *slog.Logger) (VaultWatcher, error) {
+func NewVaultWatcher(ctx context.Context, cfg Config, logger *slog.Logger) (VaultWatcher, error) {
 	vaultCfg := vault.DefaultConfig()
 	vaultCfg.Address = cfg.VaultAddr
 
@@ -63,7 +64,7 @@ func NewVaultWatcher(cfg Config, logger *slog.Logger) (VaultWatcher, error) {
 		return nil, fmt.Errorf("creating kubernetes auth: %w", err)
 	}
 
-	authInfo, err := client.Auth().Login(context.Background(), k8sAuth)
+	authInfo, err := client.Auth().Login(ctx, k8sAuth)
 	if err != nil {
 		return nil, fmt.Errorf("vault kubernetes login: %w", err)
 	}
@@ -92,7 +93,7 @@ func (w *vaultWatcher) reauth(ctx context.Context) error {
 	secret, err := w.client.Auth().Token().LookupSelfWithContext(ctx)
 	if err == nil && secret != nil {
 		ttl, _ := secret.TokenTTL()
-		if ttl > 30 { // More than 30 seconds remaining — no need to re-auth.
+		if ttl > 30*time.Second { // More than 30 seconds remaining — no need to re-auth.
 			return nil
 		}
 	}
