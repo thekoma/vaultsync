@@ -19,6 +19,7 @@ spec:
       containers:
         - name: vaultsync
           image: ghcr.io/thekoma/vaultsync:latest
+          imagePullPolicy: IfNotPresent
           env:
             - name: VAULT_ADDR
               value: "https://vault.vault.svc.cluster.local:8200"
@@ -41,13 +42,15 @@ spec:
           resources:
             requests:
               cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
               memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
           securityContext:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
             allowPrivilegeEscalation: false
             capabilities:
               drop:
