@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -75,11 +77,41 @@ func main() {
 	refresher := NewRefresher(k8sClient, dynClient, *cfg, logger)
 	controller := NewController(vault, state, discovery, refresher, logger)
 
-	// 7. Signal handling.
+	// 7. Start health server.
+	healthMux := http.NewServeMux()
+	livenessThreshold := 3 * cfg.PollInterval
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if controller.IsAlive(livenessThreshold) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "ok")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, "not alive")
+		}
+	})
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if controller.IsReady() {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "ok")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, "not ready")
+		}
+	})
+	healthAddr := fmt.Sprintf(":%s", envOr("HEALTH_PORT", "8080"))
+	healthServer := &http.Server{Addr: healthAddr, Handler: healthMux}
+	go func() {
+		logger.Info("starting health server", "addr", healthAddr)
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("health server failed", "error", err)
+		}
+	}()
+
+	// 8. Signal handling.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 8. Poll loop — reconcile immediately, then on each tick.
+	// 9. Poll loop — reconcile immediately, then on each tick.
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 

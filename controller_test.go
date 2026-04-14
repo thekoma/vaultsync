@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestReconcile(t *testing.T) {
@@ -290,5 +291,54 @@ func TestReconcileRefreshErrorContinues(t *testing.T) {
 	// litellm should remain at 3 (unchanged).
 	if state.versions["litellm"] != 3 {
 		t.Errorf("state[litellm] = %d, want 3", state.versions["litellm"])
+	}
+}
+
+func TestControllerHealthTracking(t *testing.T) {
+	vault := newFakeVaultWatcher(map[string]int{
+		"litellm": 3,
+	})
+	state := newFakeStateStore()
+	state.versions = map[string]int{
+		"litellm": 3,
+	}
+	discovery := newFakeDiscovery([]WatchedResource{
+		{
+			APIVersion: "v1",
+			Kind:       "Secret",
+			Namespace:  "litellm",
+			Name:       "litellm-secret",
+			VaultPaths: []string{"litellm"},
+		},
+	})
+	refresher := &fakeRefresher{}
+	logger := slog.Default()
+
+	ctrl := NewController(vault, state, discovery, refresher, logger)
+
+	// Before first reconciliation: not ready, but alive (startup grace).
+	if ctrl.IsReady() {
+		t.Error("IsReady() = true before first reconcile, want false")
+	}
+	if !ctrl.IsAlive(3 * time.Minute) {
+		t.Error("IsAlive() = false before first reconcile, want true (startup grace)")
+	}
+
+	// Run a successful reconciliation.
+	if err := ctrl.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	// After successful reconciliation: ready and alive.
+	if !ctrl.IsReady() {
+		t.Error("IsReady() = false after successful reconcile, want true")
+	}
+	if !ctrl.IsAlive(3 * time.Minute) {
+		t.Error("IsAlive() = false after successful reconcile, want true")
+	}
+
+	// Alive check with a very small threshold should fail.
+	if ctrl.IsAlive(0) {
+		t.Error("IsAlive(0) = true, want false (threshold expired)")
 	}
 }

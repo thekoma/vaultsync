@@ -15,6 +15,12 @@ controller:
   dryRun: false
   logLevel: "info"
 
+argocd:
+  namespace: "argocd"
+
+health:
+  port: 8080
+
 state:
   namespace: ""  # defaults to release namespace
   configMap: "vaultsync-state"

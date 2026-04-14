@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 )
 
 // Controller orchestrates the reconciliation loop: poll Vault, detect changes,
@@ -14,6 +16,11 @@ type Controller struct {
 	discovery Discovery
 	refresher Refresher
 	logger    *slog.Logger
+
+	// Health tracking (guarded by mu).
+	mu                      sync.Mutex
+	lastSuccessfulReconcile time.Time
+	ready                   bool
 }
 
 // NewController creates a Controller with the given dependencies.
@@ -25,6 +32,24 @@ func NewController(vault VaultWatcher, state StateStore, discovery Discovery, re
 		refresher: refresher,
 		logger:    logger,
 	}
+}
+
+// IsAlive returns true if the last successful reconciliation was within the given threshold.
+func (c *Controller) IsAlive(threshold time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastSuccessfulReconcile.IsZero() {
+		// Not yet reconciled — treat as alive during startup.
+		return true
+	}
+	return time.Since(c.lastSuccessfulReconcile) < threshold
+}
+
+// IsReady returns true if the controller has completed at least one successful reconciliation.
+func (c *Controller) IsReady() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ready
 }
 
 // Reconcile performs one reconciliation cycle:
@@ -50,6 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	if len(watchedPaths) == 0 {
 		c.logger.Info("no watched vault paths found, nothing to do")
+		c.markSuccess()
 		return nil
 	}
 
@@ -76,6 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if err := c.state.Save(ctx, currentVersions); err != nil {
 			return fmt.Errorf("saving state: %w", err)
 		}
+		c.markSuccess()
 		return nil
 	}
 
@@ -150,5 +177,14 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	c.markSuccess()
 	return nil
+}
+
+// markSuccess records a successful reconciliation for health checks.
+func (c *Controller) markSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSuccessfulReconcile = time.Now()
+	c.ready = true
 }
