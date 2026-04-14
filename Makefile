@@ -2,7 +2,7 @@ BINARY := vaultsync
 IMAGE  := ghcr.io/thekoma/vaultsync
 TAG    ?= latest
 
-.PHONY: build test lint docker run clean
+.PHONY: build test lint docker run clean helm-package
 
 build:
 	go build -o $(BINARY) .
@@ -21,3 +21,6 @@ run: build
 
 clean:
 	rm -f $(BINARY) coverage.out coverage.html
+
+helm-package:
+	helm package charts/vaultsync

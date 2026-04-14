@@ -1,0 +1,6 @@
+apiVersion: v2
+name: vaultsync
+description: Bridges Vault secret changes to ArgoCD-managed Kubernetes resources
+type: application
+version: 2026.4.1
+appVersion: "2026.4.1"

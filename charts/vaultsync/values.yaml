@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/thekoma/vaultsync
+  tag: ""  # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+vault:
+  addr: "https://vault.vault.svc.cluster.local:8200"
+  role: "vaultsync"
+  mount: "secret"
+  authMount: "kubernetes"
+  skipVerify: false
+
+controller:
+  pollInterval: "60s"
+  dryRun: false
+  logLevel: "info"
+
+state:
+  namespace: ""  # defaults to release namespace
+  configMap: "vaultsync-state"
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+  name: ""  # defaults to release name
+
+namespace:
+  create: true

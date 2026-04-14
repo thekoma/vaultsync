@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vaultsync.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vaultsync.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "vaultsync.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vaultsync.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vaultsync.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ include "vaultsync.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.addr | quote }}
+            - name: VAULT_ROLE
+              value: {{ .Values.vault.role | quote }}
+            - name: VAULT_MOUNT
+              value: {{ .Values.vault.mount | quote }}
+            - name: VAULT_AUTH_MOUNT
+              value: {{ .Values.vault.authMount | quote }}
+            - name: VAULT_SKIP_VERIFY
+              value: {{ .Values.vault.skipVerify | quote }}
+            - name: POLL_INTERVAL
+              value: {{ .Values.controller.pollInterval | quote }}
+            - name: DRY_RUN
+              value: {{ .Values.controller.dryRun | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.controller.logLevel | quote }}
+            - name: STATE_NAMESPACE
+              value: {{ include "vaultsync.stateNamespace" . | quote }}
+            - name: STATE_CONFIGMAP
+              value: {{ .Values.state.configMap | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
