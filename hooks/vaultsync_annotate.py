@@ -222,12 +222,51 @@ def process_file(filepath: str, check: bool) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Add vaultsync/watch annotations to YAML files with vault references."
+        description="Add vaultsync/watch annotations to YAML files with vault references.",
+        epilog="""
+examples:
+  # Fix mode (default) — add missing annotations in-place:
+  %(prog)s deployment.yaml secret.yaml
+
+  # Check mode — report what needs fixing without modifying:
+  %(prog)s --check deployment.yaml secret.yaml
+
+  # Use with pre-commit (in .pre-commit-config.yaml):
+  #   - repo: https://github.com/thekoma/vaultsync
+  #     rev: 2026.4.2
+  #     hooks:
+  #       - id: vaultsync-annotate
+  #
+  # For check-only in CI, pass --check via args:
+  #       - id: vaultsync-annotate
+  #         args: [--check]
+
+behavior:
+  Scans YAML files for Bank-Vaults webhook references matching the pattern
+  vault:MOUNT/data/PATH#key (e.g., vault:secret/data/myapp#password).
+
+  For each Kubernetes resource document containing such references, it
+  adds or updates a vaultsync/watch annotation with the deduplicated,
+  sorted list of vault paths. This annotation tells the vaultSync
+  controller which Vault secrets to monitor for version changes.
+
+  Resources with 'vault.security.banzaicloud.io/mutate: skip' are
+  excluded (these are typically ArgoCD parent apps that should not be
+  watched directly).
+
+  Multi-document YAML files (separated by ---) are supported; each
+  document is processed independently.
+
+exit codes:
+  0  No changes needed (all annotations are correct or no vault refs found)
+  1  Files were modified (fix mode) or need modification (check mode)
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Check mode: report missing annotations without modifying files.",
+        help="Report missing/incorrect annotations without modifying files.",
     )
     parser.add_argument("files", nargs="*", help="YAML files to process.")
     args = parser.parse_args()
