@@ -148,26 +148,44 @@ def add_or_update_annotation(doc: str, desired: str) -> str:
     return doc
 
 
-def process_document(doc: str) -> Tuple[str, bool]:
+def is_k8s_manifest(doc: str) -> bool:
+    """Return True if the document looks like a Kubernetes manifest.
+
+    A K8s manifest has both 'apiVersion:' and 'kind:' as top-level keys.
+    Plain Helm values files or other config files do not.
+    """
+    has_api = re.search(r"^apiVersion:\s", doc, re.MULTILINE) is not None
+    has_kind = re.search(r"^kind:\s", doc, re.MULTILINE) is not None
+    return has_api and has_kind
+
+
+def process_document(doc: str) -> Tuple[str, bool, List[str]]:
     """Process a single YAML document.
 
-    Returns (possibly_modified_doc, was_changed).
+    Returns (possibly_modified_doc, was_changed, unhandled_paths).
+    unhandled_paths is non-empty when vault refs are found in a non-manifest
+    document (e.g., a Helm values file).
     """
     # Skip documents that have "mutate: skip" (parent apps)
     if MUTATE_SKIP_RE.search(doc):
-        return doc, False
+        return doc, False, []
 
     paths = extract_vault_paths(doc)
     if not paths:
-        return doc, False
+        return doc, False, []
+
+    # Only annotate Kubernetes manifests (have apiVersion + kind).
+    # Values files, plain configs, etc. get a warning instead.
+    if not is_k8s_manifest(doc):
+        return doc, False, paths
 
     desired = ",".join(paths)
     current = find_annotation_value(doc)
     if current == desired:
-        return doc, False
+        return doc, False, []
 
     new_doc = add_or_update_annotation(doc, desired)
-    return new_doc, True
+    return new_doc, True, []
 
 
 def process_file(filepath: str, check: bool) -> bool:
@@ -184,15 +202,29 @@ def process_file(filepath: str, check: bool) -> bool:
     parts = re.split(r"(^---\s*$)", content, flags=re.MULTILINE)
 
     changed = False
+    all_unhandled: List[str] = []
     new_parts: List[str] = []
     for part in parts:
         if re.match(r"^---\s*$", part):
             new_parts.append(part)
             continue
-        new_doc, doc_changed = process_document(part)
+        new_doc, doc_changed, unhandled = process_document(part)
         if doc_changed:
             changed = True
+        if unhandled:
+            all_unhandled.extend(unhandled)
         new_parts.append(new_doc)
+
+    # Warn about vault refs in non-manifest files (values files, configs, etc.)
+    if all_unhandled:
+        unique = sorted(set(all_unhandled))
+        print(
+            f"WARNING: {filepath}: vault references found but file is not a "
+            f"Kubernetes manifest (no apiVersion/kind). "
+            f"Ensure the parent Application CR has vaultsync/watch for: "
+            f"{','.join(unique)}",
+            file=sys.stderr,
+        )
 
     if not changed:
         return False
@@ -200,7 +232,6 @@ def process_file(filepath: str, check: bool) -> bool:
     new_content = "".join(new_parts)
 
     if check:
-        # Report what would change
         paths_found = extract_vault_paths(content)
         print(
             f"{filepath}: needs vaultsync/watch annotation "

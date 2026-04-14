@@ -238,6 +238,58 @@ The `secret/data/` prefix is automatically stripped if present.
 
 The net effect: secrets in Vault rotate, and within one poll interval, all annotated resources are refreshed with the new values -- without any pod restarts, manual intervention, or destructive operations.
 
+## Pre-commit Hook
+
+vaultSync ships a [pre-commit](https://pre-commit.com/) hook that automatically adds `vaultsync/watch` annotations to Kubernetes manifests containing `vault:` references.
+
+### Setup
+
+Add to your `.pre-commit-config.yaml`:
+
+```yaml
+- repo: https://github.com/thekoma/vaultsync
+  rev: 2026.4.2
+  hooks:
+    - id: vaultsync-annotate
+```
+
+### What it does
+
+The hook scans YAML files for Bank-Vaults webhook patterns (`vault:MOUNT/data/PATH#key`) and:
+
+- **Kubernetes manifests** (files with `apiVersion` + `kind`): automatically adds or updates the `vaultsync/watch` annotation with the correct vault paths
+- **Non-manifest files** (Helm values, plain configs): emits a warning reminding you to ensure the parent Application CR has the annotation
+
+```
+$ git commit
+vaultsync-annotate...................................................Failed
+- files were modified by this hook
+
+applications/odin/litellm/secret.yaml: added/updated vaultsync/watch annotation (secret/data/litellm)
+applications/odin/qbittorrent/helm.yaml: added/updated vaultsync/watch annotation (secret/data/airvpn/qbittorrent,secret/data/asgard,secret/data/wasabi-backup)
+WARNING: infrastructure/odin/argocd/values.yml: vault references found but file is not a Kubernetes manifest (no apiVersion/kind). Ensure the parent Application CR has vaultsync/watch for: secret/data/argocd
+```
+
+After the hook modifies files, `git add` the changes and commit again.
+
+### Check-only mode
+
+For CI or when you want to verify without modifying files:
+
+```yaml
+- repo: https://github.com/thekoma/vaultsync
+  rev: 2026.4.2
+  hooks:
+    - id: vaultsync-annotate
+      args: [--check]
+```
+
+### Skipped files
+
+- Files with `vault.security.banzaicloud.io/mutate: skip` are excluded (parent app-of-apps that don't contain vault refs directly)
+- Files without any `vault:` references are skipped
+- Non-YAML files are not processed
+
 ## Development
 
 ```bash
