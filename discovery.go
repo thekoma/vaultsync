@@ -167,7 +167,11 @@ func ParseWatchAnnotation(value string) []string {
 		if p == "" {
 			continue
 		}
-		p = strings.TrimPrefix(p, "secret/data/")
+		// Strip the "MOUNT/data/" prefix to get the path relative to the KV v2 mount.
+		// e.g., "secret/data/litellm" → "litellm", "kv/data/myapp" → "myapp"
+		if idx := strings.Index(p, "/data/"); idx >= 0 {
+			p = p[idx+len("/data/"):]
+		}
 		paths = append(paths, p)
 	}
 	return paths
