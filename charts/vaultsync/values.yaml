@@ -23,6 +23,8 @@ app-template:
               value: "kubernetes"
             VAULT_SKIP_VERIFY:
               value: "false"
+            VAULT_CACERT:
+              value: ""  # Path to CA bundle, e.g., /etc/vault-ca/trust-bundle.pem
             POLL_INTERVAL:
               value: "60s"
             STATE_NAMESPACE:
