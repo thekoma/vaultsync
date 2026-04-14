@@ -82,7 +82,9 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	pathMap := BuildPathToResourceMap(resources)
 
 	// Step 7: For each changed path, refresh affected resources (deduplicated).
+	// Track paths where at least one resource refresh failed.
 	refreshed := make(map[string]bool)
+	failedPaths := make(map[string]bool)
 	for path := range changed {
 		affected, ok := pathMap[path]
 		if !ok {
@@ -101,7 +103,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			}
 			refreshed[key] = true
 
-			// Step 8: Log errors but continue.
+			// Step 8: Log errors but continue. Mark the path as failed.
 			if err := c.refresher.Refresh(ctx, resource); err != nil {
 				c.logger.Error("failed to refresh resource",
 					"kind", resource.Kind,
@@ -109,6 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 					"name", resource.Name,
 					"error", err,
 				)
+				failedPaths[path] = true
 				continue
 			}
 			c.logger.Info("refreshed resource",
@@ -119,8 +122,24 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	// Step 9: Save updated state with current versions.
-	if err := c.state.Save(ctx, currentVersions); err != nil {
+	// Step 9: Merge current versions into stored state, skipping failed paths
+	// so they are retried on the next cycle.
+	mergedVersions := make(map[string]int, len(currentVersions))
+	for k, v := range storedVersions {
+		mergedVersions[k] = v
+	}
+	for k, v := range currentVersions {
+		if failedPaths[k] {
+			c.logger.Warn("skipping state update for failed path",
+				"path", k,
+				"version", v,
+			)
+			continue
+		}
+		mergedVersions[k] = v
+	}
+
+	if err := c.state.Save(ctx, mergedVersions); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
 

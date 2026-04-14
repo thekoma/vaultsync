@@ -243,14 +243,16 @@ func TestReconcileDeduplication(t *testing.T) {
 }
 
 func TestReconcileRefreshErrorContinues(t *testing.T) {
-	// wasabi-backup changed.
+	// wasabi-backup changed from 7 to 8, litellm unchanged.
 	vault := newFakeVaultWatcher(map[string]int{
 		"wasabi-backup": 8,
+		"litellm":       3,
 	})
 
 	state := newFakeStateStore()
 	state.versions = map[string]int{
 		"wasabi-backup": 7,
+		"litellm":       3,
 	}
 
 	// Resource watches wasabi-backup, but refresher will return an error.
@@ -278,5 +280,15 @@ func TestReconcileRefreshErrorContinues(t *testing.T) {
 	// State should still be saved despite refresh failure.
 	if !state.saved {
 		t.Error("state was not saved despite refresh error")
+	}
+
+	// wasabi-backup should retain old version 7 because its refresh failed.
+	if state.versions["wasabi-backup"] != 7 {
+		t.Errorf("state[wasabi-backup] = %d, want 7 (should not advance on failure)", state.versions["wasabi-backup"])
+	}
+
+	// litellm should remain at 3 (unchanged).
+	if state.versions["litellm"] != 3 {
+		t.Errorf("state[litellm] = %d, want 3", state.versions["litellm"])
 	}
 }
