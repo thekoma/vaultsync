@@ -112,12 +112,25 @@ func main() {
 	defer stop()
 
 	// 9. Poll loop — reconcile immediately, then on each tick.
+	// Use exponential backoff on consecutive failures to avoid hammering
+	// a down Vault or K8s API.
+	const maxBackoff = 5 * time.Minute
+
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
+
+	consecutiveFailures := 0
 
 	// Run first reconciliation immediately.
 	if err := controller.Reconcile(ctx); err != nil {
 		logger.Error("reconcile failed", "error", err)
+		consecutiveFailures++
+		backoff := cfg.PollInterval * time.Duration(1<<min(consecutiveFailures, 5))
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+		logger.Info("backing off after failure", "backoff", backoff.String(), "consecutive_failures", consecutiveFailures)
+		ticker.Reset(backoff)
 	}
 
 	for {
@@ -127,7 +140,19 @@ func main() {
 			return
 		case <-ticker.C:
 			if err := controller.Reconcile(ctx); err != nil {
-				logger.Error("reconcile failed", "error", err)
+				consecutiveFailures++
+				backoff := cfg.PollInterval * time.Duration(1<<min(consecutiveFailures, 5))
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				logger.Error("reconcile failed", "error", err, "backoff", backoff.String(), "consecutive_failures", consecutiveFailures)
+				ticker.Reset(backoff)
+			} else {
+				if consecutiveFailures > 0 {
+					logger.Info("reconcile succeeded after failures, resetting interval", "consecutive_failures", consecutiveFailures)
+					ticker.Reset(cfg.PollInterval)
+				}
+				consecutiveFailures = 0
 			}
 		}
 	}
