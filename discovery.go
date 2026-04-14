@@ -11,8 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-const watchAnnotation = "vaultsync/watch"
-
 // WatchedResource represents a Kubernetes resource that watches one or more Vault secret paths.
 type WatchedResource struct {
 	APIVersion string
@@ -33,15 +31,17 @@ type k8sDiscovery struct {
 	client          kubernetes.Interface
 	dynClient       dynamic.Interface
 	argoCDNamespace string
+	watchAnnotation string
 	logger          *slog.Logger
 }
 
-// NewDiscovery creates a Discovery that scans Kubernetes resources for the vaultsync/watch annotation.
-func NewDiscovery(client kubernetes.Interface, dynClient dynamic.Interface, argoCDNamespace string, logger *slog.Logger) Discovery {
+// NewDiscovery creates a Discovery that scans Kubernetes resources for the given watch annotation.
+func NewDiscovery(client kubernetes.Interface, dynClient dynamic.Interface, argoCDNamespace string, watchAnnotation string, logger *slog.Logger) Discovery {
 	return &k8sDiscovery{
 		client:          client,
 		dynClient:       dynClient,
 		argoCDNamespace: argoCDNamespace,
+		watchAnnotation: watchAnnotation,
 		logger:          logger,
 	}
 }
@@ -57,7 +57,7 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 		return nil, err
 	}
 	for _, s := range secrets.Items {
-		ann, ok := s.Annotations[watchAnnotation]
+		ann, ok := s.Annotations[d.watchAnnotation]
 		if !ok || ann == "" {
 			continue
 		}
@@ -85,7 +85,7 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 		return nil, err
 	}
 	for _, cm := range configMaps.Items {
-		ann, ok := cm.Annotations[watchAnnotation]
+		ann, ok := cm.Annotations[d.watchAnnotation]
 		if !ok || ann == "" {
 			continue
 		}
@@ -121,7 +121,7 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 	} else {
 		for _, app := range apps.Items {
 			annotations := app.GetAnnotations()
-			ann, ok := annotations[watchAnnotation]
+			ann, ok := annotations[d.watchAnnotation]
 			if !ok || ann == "" {
 				continue
 			}

@@ -17,9 +17,11 @@ type Config struct {
 	PollInterval     time.Duration
 	StateNamespace   string
 	StateConfigMap   string
-	ArgoCDNamespace  string
-	DryRun           bool
-	LogLevel         string
+	ArgoCDNamespace    string
+	DryRun             bool
+	LogLevel           string
+	WatchAnnotation    string
+	TriggerAnnotation  string
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -45,8 +47,10 @@ func LoadConfig() (*Config, error) {
 		StateNamespace:  envOr("STATE_NAMESPACE", "vaultsync"),
 		StateConfigMap:  envOr("STATE_CONFIGMAP", "vaultsync-state"),
 		ArgoCDNamespace: envOr("ARGOCD_NAMESPACE", "argocd"),
-		DryRun:          envBool("DRY_RUN"),
-		LogLevel:        envOr("LOG_LEVEL", "info"),
+		DryRun:            envBool("DRY_RUN"),
+		LogLevel:          envOr("LOG_LEVEL", "info"),
+		WatchAnnotation:   envOr("WATCH_ANNOTATION", "vaultsync/watch"),
+		TriggerAnnotation: envOr("TRIGGER_ANNOTATION", "vaultsync/trigger"),
 	}, nil
 }
 

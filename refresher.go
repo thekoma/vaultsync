@@ -14,8 +14,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-const triggerAnnotation = "vaultsync/trigger"
-
 // Refresher triggers a refresh action on a Kubernetes resource
 // so that it picks up changes from Vault.
 type Refresher interface {
@@ -24,30 +22,32 @@ type Refresher interface {
 
 // k8sRefresher implements Refresher using real Kubernetes API calls.
 type k8sRefresher struct {
-	client    kubernetes.Interface
-	dynClient dynamic.Interface
-	dryRun    bool
-	logger    *slog.Logger
-	now       func() time.Time // injectable clock for testing
+	client            kubernetes.Interface
+	dynClient         dynamic.Interface
+	triggerAnnotation string
+	dryRun            bool
+	logger            *slog.Logger
+	now               func() time.Time // injectable clock for testing
 }
 
 // NewRefresher creates a Refresher backed by Kubernetes API clients.
 func NewRefresher(client kubernetes.Interface, dynClient dynamic.Interface, cfg Config, logger *slog.Logger) Refresher {
 	return &k8sRefresher{
-		client:    client,
-		dynClient: dynClient,
-		dryRun:    cfg.DryRun,
-		logger:    logger,
-		now:       time.Now,
+		client:            client,
+		dynClient:         dynClient,
+		triggerAnnotation: cfg.TriggerAnnotation,
+		dryRun:            cfg.DryRun,
+		logger:            logger,
+		now:               time.Now,
 	}
 }
 
 // triggerPatch builds the JSON merge-patch payload for the trigger annotation.
-func triggerPatch(timestamp string) ([]byte, error) {
+func triggerPatch(annotationKey string, timestamp string) ([]byte, error) {
 	patch := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"annotations": map[string]interface{}{
-				triggerAnnotation: timestamp,
+				annotationKey: timestamp,
 			},
 		},
 	}
@@ -75,7 +75,7 @@ func (r *k8sRefresher) Refresh(ctx context.Context, resource WatchedResource) er
 	}
 
 	timestamp := r.now().UTC().Format(time.RFC3339Nano)
-	patchBytes, err := triggerPatch(timestamp)
+	patchBytes, err := triggerPatch(r.triggerAnnotation, timestamp)
 	if err != nil {
 		return fmt.Errorf("marshalling trigger patch: %w", err)
 	}

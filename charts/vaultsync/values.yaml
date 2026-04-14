@@ -37,6 +37,10 @@ app-template:
               value: "argocd"
             HEALTH_PORT:
               value: "8080"
+            WATCH_ANNOTATION:
+              value: "vaultsync/watch"
+            TRIGGER_ANNOTATION:
+              value: "vaultsync/trigger"
           resources:
             requests:
               cpu: 10m

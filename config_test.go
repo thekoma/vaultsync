@@ -12,6 +12,7 @@ func clearEnv(t *testing.T) {
 		"VAULT_ADDR", "VAULT_ROLE", "VAULT_MOUNT", "VAULT_AUTH_MOUNT",
 		"VAULT_SKIP_VERIFY", "POLL_INTERVAL", "STATE_NAMESPACE",
 		"STATE_CONFIGMAP", "ARGOCD_NAMESPACE", "DRY_RUN", "LOG_LEVEL",
+		"WATCH_ANNOTATION", "TRIGGER_ANNOTATION",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -40,6 +41,8 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("ARGOCD_NAMESPACE", "argo-system")
 	t.Setenv("DRY_RUN", "true")
 	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("WATCH_ANNOTATION", "custom/watch")
+	t.Setenv("TRIGGER_ANNOTATION", "custom/trigger")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -78,6 +81,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.LogLevel != "debug" {
 		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "debug")
+	}
+	if cfg.WatchAnnotation != "custom/watch" {
+		t.Errorf("WatchAnnotation = %q, want %q", cfg.WatchAnnotation, "custom/watch")
+	}
+	if cfg.TriggerAnnotation != "custom/trigger" {
+		t.Errorf("TriggerAnnotation = %q, want %q", cfg.TriggerAnnotation, "custom/trigger")
 	}
 }
 
@@ -120,5 +129,11 @@ func TestLoadConfigDefaultValues(t *testing.T) {
 	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "info")
+	}
+	if cfg.WatchAnnotation != "vaultsync/watch" {
+		t.Errorf("WatchAnnotation = %q, want %q", cfg.WatchAnnotation, "vaultsync/watch")
+	}
+	if cfg.TriggerAnnotation != "vaultsync/trigger" {
+		t.Errorf("TriggerAnnotation = %q, want %q", cfg.TriggerAnnotation, "vaultsync/trigger")
 	}
 }

@@ -7,7 +7,7 @@ controller knows which secrets to watch. Works with any Vault KV v2 mount
 name (secret, kv, custom-mount, etc.).
 
 Usage:
-    vaultsync_annotate.py [--check] FILE [FILE ...]
+    vaultsync_annotate.py [--check] [--watch-annotation KEY] FILE [FILE ...]
 
 Exits 0 if nothing needed changing.
 Exits 1 if files were modified (fix mode) or need modification (check mode).
@@ -30,7 +30,7 @@ MUTATE_SKIP_RE = re.compile(
     re.MULTILINE,
 )
 
-ANNOTATION_KEY = "vaultsync/watch"
+DEFAULT_ANNOTATION_KEY = "vaultsync/watch"
 
 
 def extract_vault_paths(text: str) -> List[str]:
@@ -45,11 +45,12 @@ def extract_vault_paths(text: str) -> List[str]:
     return sorted(paths)
 
 
-def find_annotation_value(doc: str) -> Optional[str]:
-    """Return the current vaultsync/watch value in *doc*, or None."""
+def find_annotation_value(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> Optional[str]:
+    """Return the current annotation value in *doc*, or None."""
     # Match the annotation line allowing for quoting
+    escaped_key = re.escape(annotation_key)
     m = re.search(
-        r"""^\s+vaultsync/watch:\s*["']?([^"'\n]*)["']?\s*$""",
+        rf"""^\s+{escaped_key}:\s*["']?([^"'\n]*)["']?\s*$""",
         doc,
         re.MULTILINE,
     )
@@ -62,23 +63,24 @@ def _indent_of(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
-def add_or_update_annotation(doc: str, desired: str) -> str:
-    """Return *doc* with the vaultsync/watch annotation set to *desired*.
+def add_or_update_annotation(doc: str, desired: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> str:
+    """Return *doc* with the watch annotation set to *desired*.
 
     Handles three cases:
       1. Annotation already present -> replace value
       2. annotations: block exists   -> append line
       3. No annotations: block       -> create one after metadata:
     """
+    escaped_key = re.escape(annotation_key)
     # --- Case 1: annotation already present, just needs updating -----------
     pattern = re.compile(
-        r"""^(\s+)(vaultsync/watch:\s*)["']?[^"'\n]*["']?\s*$""",
+        rf"""^(\s+)({escaped_key}:\s*)["']?[^"'\n]*["']?\s*$""",
         re.MULTILINE,
     )
     m = pattern.search(doc)
     if m:
         indent = m.group(1)
-        return pattern.sub(f'{indent}vaultsync/watch: "{desired}"', doc)
+        return pattern.sub(f'{indent}{annotation_key}: "{desired}"', doc)
 
     # --- Case 2: annotations: block exists ---------------------------------
     # Find "  annotations:" under metadata.  We look for the pattern:
@@ -98,7 +100,7 @@ def add_or_update_annotation(doc: str, desired: str) -> str:
             key_indent = next_line_m.group(1)
         else:
             key_indent = ann_indent + "  "
-        new_line = f'\n{key_indent}vaultsync/watch: "{desired}"'
+        new_line = f'\n{key_indent}{annotation_key}: "{desired}"'
         return doc[:ann_end] + new_line + doc[ann_end:]
 
     # --- Case 3: no annotations: block, create one after metadata: ----------
@@ -139,7 +141,7 @@ def add_or_update_annotation(doc: str, desired: str) -> str:
         # child line, so we don't need a leading newline.
         new_block = (
             f"{child_indent}annotations:"
-            f'\n{ann_key_indent}vaultsync/watch: "{desired}"'
+            f'\n{ann_key_indent}{annotation_key}: "{desired}"'
             f"\n"
         )
         return doc[:last_child_end] + new_block + doc[last_child_end:]
@@ -159,7 +161,7 @@ def is_k8s_manifest(doc: str) -> bool:
     return has_api and has_kind
 
 
-def process_document(doc: str) -> Tuple[str, bool, List[str]]:
+def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> Tuple[str, bool, List[str]]:
     """Process a single YAML document.
 
     Returns (possibly_modified_doc, was_changed, unhandled_paths).
@@ -180,15 +182,15 @@ def process_document(doc: str) -> Tuple[str, bool, List[str]]:
         return doc, False, paths
 
     desired = ",".join(paths)
-    current = find_annotation_value(doc)
+    current = find_annotation_value(doc, annotation_key)
     if current == desired:
         return doc, False, []
 
-    new_doc = add_or_update_annotation(doc, desired)
+    new_doc = add_or_update_annotation(doc, desired, annotation_key)
     return new_doc, True, []
 
 
-def process_file(filepath: str, check: bool) -> bool:
+def process_file(filepath: str, check: bool, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> bool:
     """Process a single file.  Returns True if changes were made / needed."""
     try:
         with open(filepath, "r") as f:
@@ -208,7 +210,7 @@ def process_file(filepath: str, check: bool) -> bool:
         if re.match(r"^---\s*$", part):
             new_parts.append(part)
             continue
-        new_doc, doc_changed, unhandled = process_document(part)
+        new_doc, doc_changed, unhandled = process_document(part, annotation_key)
         if doc_changed:
             changed = True
         if unhandled:
@@ -221,7 +223,7 @@ def process_file(filepath: str, check: bool) -> bool:
         print(
             f"WARNING: {filepath}: vault references found but file is not a "
             f"Kubernetes manifest (no apiVersion/kind). "
-            f"Ensure the parent Application CR has vaultsync/watch for: "
+            f"Ensure the parent Application CR has {annotation_key} for: "
             f"{','.join(unique)}",
             file=sys.stderr,
         )
@@ -234,7 +236,7 @@ def process_file(filepath: str, check: bool) -> bool:
     if check:
         paths_found = extract_vault_paths(content)
         print(
-            f"{filepath}: needs vaultsync/watch annotation "
+            f"{filepath}: needs {annotation_key} annotation "
             f"({','.join(paths_found)})",
             file=sys.stderr,
         )
@@ -243,7 +245,7 @@ def process_file(filepath: str, check: bool) -> bool:
             f.write(new_content)
         paths_found = extract_vault_paths(content)
         print(
-            f"{filepath}: added/updated vaultsync/watch annotation "
+            f"{filepath}: added/updated {annotation_key} annotation "
             f"({','.join(paths_found)})",
             file=sys.stderr,
         )
@@ -299,6 +301,11 @@ exit codes:
         action="store_true",
         help="Report missing/incorrect annotations without modifying files.",
     )
+    parser.add_argument(
+        "--watch-annotation",
+        default=DEFAULT_ANNOTATION_KEY,
+        help=f"Annotation key to use for vault watch (default: {DEFAULT_ANNOTATION_KEY}).",
+    )
     parser.add_argument("files", nargs="*", help="YAML files to process.")
     args = parser.parse_args()
 
@@ -307,7 +314,7 @@ exit codes:
 
     any_changed = False
     for filepath in args.files:
-        if process_file(filepath, check=args.check):
+        if process_file(filepath, check=args.check, annotation_key=args.watch_annotation):
             any_changed = True
 
     return 1 if any_changed else 0

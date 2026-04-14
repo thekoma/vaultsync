@@ -195,6 +195,8 @@ All configuration is via Helm values (which map to environment variables):
 | `controller.pollInterval` | `POLL_INTERVAL` | `60s` | How often to poll Vault for changes |
 | `controller.dryRun` | `DRY_RUN` | `false` | Log actions without patching resources |
 | `controller.logLevel` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `controller.watchAnnotation` | `WATCH_ANNOTATION` | `vaultsync/watch` | Annotation key used to discover watched resources |
+| `controller.triggerAnnotation` | `TRIGGER_ANNOTATION` | `vaultsync/trigger` | Annotation key used for the drift-trigger patch |
 | `state.namespace` | `STATE_NAMESPACE` | Release namespace | Namespace for the state ConfigMap |
 | `state.configMap` | `STATE_CONFIGMAP` | `vaultsync-state` | Name of the state ConfigMap |
 | `image.repository` | -- | `ghcr.io/thekoma/vaultsync` | Container image repository |
@@ -237,6 +239,30 @@ The `secret/data/` prefix is automatically stripped if present.
 6. **State update**: vaultSync persists the new version to the state ConfigMap so the same change is not processed again.
 
 The net effect: secrets in Vault rotate, and within one poll interval, all annotated resources are refreshed with the new values -- without any pod restarts, manual intervention, or destructive operations.
+
+## FluxCD Compatibility
+
+vaultSync works with any GitOps controller that reconciles drift -- not just ArgoCD.
+With FluxCD, the same mechanism applies: vaultSync patches a trigger annotation,
+Flux detects the drift during its reconciliation loop, re-applies from git, and the
+webhook re-injects new values.
+
+To customize the annotation names (e.g., to avoid conflicts or match your naming convention):
+
+| Value | Env Var | Default |
+|-------|---------|---------|
+| `controller.watchAnnotation` | `WATCH_ANNOTATION` | `vaultsync/watch` |
+| `controller.triggerAnnotation` | `TRIGGER_ANNOTATION` | `vaultsync/trigger` |
+
+For the pre-commit hook, pass `--watch-annotation` to match:
+
+```yaml
+- repo: https://github.com/thekoma/vaultsync
+  rev: 2026.4.2
+  hooks:
+    - id: vaultsync-annotate
+      args: [--watch-annotation, "custom/watch"]
+```
 
 ## Pre-commit Hook
 
