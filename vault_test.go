@@ -42,6 +42,18 @@ func (f *fakeVaultWatcher) GetAllVersions(ctx context.Context) (map[string]int, 
 	return result, nil
 }
 
+func (f *fakeVaultWatcher) GetVersionsForPaths(ctx context.Context, paths []string) (map[string]int, error) {
+	result := make(map[string]int, len(paths))
+	for _, p := range paths {
+		v, ok := f.secrets[p]
+		if !ok {
+			continue
+		}
+		result[p] = v
+	}
+	return result, nil
+}
+
 // Compile-time check: fakeVaultWatcher must satisfy VaultWatcher.
 var _ VaultWatcher = (*fakeVaultWatcher)(nil)
 
@@ -118,6 +130,41 @@ func TestVaultWatcherInterface_GetAllVersions(t *testing.T) {
 		if got != wantVersion {
 			t.Errorf("GetAllVersions()[%q] = %d, want %d", path, got, wantVersion)
 		}
+	}
+}
+
+func TestVaultWatcherInterface_GetVersionsForPaths(t *testing.T) {
+	secrets := map[string]int{
+		"app/db":    3,
+		"app/redis": 1,
+		"infra/tls": 5,
+	}
+	var w VaultWatcher = newFakeVaultWatcher(secrets)
+
+	// Request only two of the three paths.
+	versions, err := w.GetVersionsForPaths(context.Background(), []string{"app/db", "infra/tls"})
+	if err != nil {
+		t.Fatalf("GetVersionsForPaths() error = %v", err)
+	}
+
+	if len(versions) != 2 {
+		t.Fatalf("GetVersionsForPaths() returned %d entries, want 2", len(versions))
+	}
+
+	if versions["app/db"] != 3 {
+		t.Errorf("GetVersionsForPaths()[app/db] = %d, want 3", versions["app/db"])
+	}
+	if versions["infra/tls"] != 5 {
+		t.Errorf("GetVersionsForPaths()[infra/tls] = %d, want 5", versions["infra/tls"])
+	}
+
+	// Requesting a nonexistent path should skip it without error.
+	versions, err = w.GetVersionsForPaths(context.Background(), []string{"nonexistent"})
+	if err != nil {
+		t.Fatalf("GetVersionsForPaths(nonexistent) error = %v", err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("GetVersionsForPaths(nonexistent) returned %d entries, want 0", len(versions))
 	}
 }
 
