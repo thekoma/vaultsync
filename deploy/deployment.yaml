@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultsync
+  namespace: vaultsync
+  labels:
+    app: vaultsync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultsync
+  template:
+    metadata:
+      labels:
+        app: vaultsync
+    spec:
+      serviceAccountName: vaultsync
+      containers:
+        - name: vaultsync
+          image: ghcr.io/thekoma/vaultsync:latest
+          env:
+            - name: VAULT_ADDR
+              value: "https://vault.vault.svc.cluster.local:8200"
+            - name: VAULT_ROLE
+              value: "vaultsync"
+            - name: VAULT_MOUNT
+              value: "secret"
+            - name: VAULT_SKIP_VERIFY
+              value: "false"
+            - name: POLL_INTERVAL
+              value: "60s"
+            - name: STATE_NAMESPACE
+              value: "vaultsync"
+            - name: STATE_CONFIGMAP
+              value: "vaultsync-state"
+            - name: DRY_RUN
+              value: "false"
+            - name: LOG_LEVEL
+              value: "info"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
