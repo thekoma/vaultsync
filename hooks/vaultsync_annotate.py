@@ -161,14 +161,93 @@ def is_k8s_manifest(doc: str) -> bool:
     return has_api and has_kind
 
 
+# Matches an annotations: block that contains vault.security.banzaicloud.io/
+# but NOT mutate: skip
+BANKVAULTS_ANN_RE = re.compile(
+    r"""vault\.security\.banzaicloud\.io/(?!mutate)""",
+)
+
+
+def annotate_values_file(doc: str, desired: str, annotation_key: str) -> Tuple[str, bool, bool]:
+    """Add watch annotation to annotation blocks in Helm values files.
+
+    Finds every 'annotations:' block that contains vault.security.banzaicloud.io/
+    annotations (but not mutate: skip) and inserts the watch annotation if missing.
+    Returns (modified_doc, was_changed, had_bankvaults_blocks).
+    """
+    lines = doc.split("\n")
+    new_lines = []
+    changed = False
+    found_bankvaults_block = False
+    i = 0
+    escaped_key = re.escape(annotation_key)
+
+    while i < len(lines):
+        line = lines[i]
+        new_lines.append(line)
+
+        # Look for "annotations:" lines (at any indent level)
+        ann_match = re.match(r"^(\s+)(annotations:\s*)$", line)
+        if not ann_match:
+            i += 1
+            continue
+
+        ann_indent = len(ann_match.group(1))
+
+        # Collect the annotation block lines (deeper indent than annotations:)
+        block_start = i + 1
+        block_end = block_start
+        while block_end < len(lines):
+            next_line = lines[block_end]
+            if next_line.strip() == "":
+                block_end += 1
+                continue
+            if _indent_of(next_line) > ann_indent:
+                block_end += 1
+            else:
+                break
+
+        block_lines = lines[block_start:block_end]
+        block_text = "\n".join(block_lines)
+
+        # Check if this block has vault.security.banzaicloud.io/ (no skip)
+        has_bankvaults = BANKVAULTS_ANN_RE.search(block_text)
+        has_skip = re.search(r"""mutate:\s*["']?skip""", block_text)
+        already_has = re.search(rf"""^\s+{escaped_key}:""", block_text, re.MULTILINE)
+
+        if has_bankvaults and not has_skip:
+            found_bankvaults_block = True
+
+        if has_bankvaults and not has_skip and not already_has:
+            # Determine indent from the first annotation key in the block
+            key_indent = None
+            for bl in block_lines:
+                if bl.strip():
+                    key_indent = " " * _indent_of(bl)
+                    break
+            if key_indent is None:
+                key_indent = " " * (ann_indent + 2)
+
+            # Insert the watch annotation as the first key in the block
+            new_lines.append(f'{key_indent}{annotation_key}: "{desired}"')
+            changed = True
+
+        # Append the rest of the block
+        for j in range(block_start, block_end):
+            new_lines.append(lines[j])
+        i = block_end
+
+    return "\n".join(new_lines), changed, found_bankvaults_block
+
+
 def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> Tuple[str, bool, List[str]]:
     """Process a single YAML document.
 
     Returns (possibly_modified_doc, was_changed, unhandled_paths).
     unhandled_paths is non-empty when vault refs are found in a non-manifest
-    document (e.g., a Helm values file).
+    document that has no Bank-Vaults annotation blocks to attach to.
     """
-    # Skip documents that have "mutate: skip" (parent apps)
+    # Skip documents that have "mutate: skip" at the top level (parent apps)
     if MUTATE_SKIP_RE.search(doc):
         return doc, False, []
 
@@ -176,18 +255,26 @@ def process_document(doc: str, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> 
     if not paths:
         return doc, False, []
 
-    # Only annotate Kubernetes manifests (have apiVersion + kind).
-    # Values files, plain configs, etc. get a warning instead.
-    if not is_k8s_manifest(doc):
-        return doc, False, paths
-
     desired = ",".join(paths)
-    current = find_annotation_value(doc, annotation_key)
-    if current == desired:
+
+    # Case 1: Kubernetes manifest — annotate metadata.annotations as before
+    if is_k8s_manifest(doc):
+        current = find_annotation_value(doc, annotation_key)
+        if current == desired:
+            return doc, False, []
+        new_doc = add_or_update_annotation(doc, desired, annotation_key)
+        return new_doc, True, []
+
+    # Case 2: Non-manifest (values file) — annotate Bank-Vaults annotation blocks
+    new_doc, changed, had_blocks = annotate_values_file(doc, desired, annotation_key)
+    if changed:
+        return new_doc, True, []
+    if had_blocks:
+        # Bank-Vaults blocks exist and already have the annotation — all good
         return doc, False, []
 
-    new_doc = add_or_update_annotation(doc, desired, annotation_key)
-    return new_doc, True, []
+    # Case 3: Non-manifest with no Bank-Vaults annotation blocks — warn
+    return doc, False, paths
 
 
 def process_file(filepath: str, check: bool, annotation_key: str = DEFAULT_ANNOTATION_KEY) -> bool:
