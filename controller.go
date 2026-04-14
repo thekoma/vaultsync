@@ -28,31 +28,49 @@ func NewController(vault VaultWatcher, state StateStore, discovery Discovery, re
 }
 
 // Reconcile performs one reconciliation cycle:
-//  1. Poll Vault for current versions.
-//  2. Load stored state.
-//  3. Detect changes.
-//  4. If changes, discover annotated resources, build path→resource map,
-//     and refresh affected resources (deduplicated).
-//  5. Save updated state.
+//  1. Discover annotated resources to find which Vault paths are watched.
+//  2. Poll Vault only for those watched paths (not all secrets).
+//  3. Load stored state and detect changes.
+//  4. If changes, refresh affected resources (deduplicated).
+//  5. Save updated state, skipping paths with failed refreshes.
 func (c *Controller) Reconcile(ctx context.Context) error {
-	// Step 1: Poll Vault for current versions.
-	currentVersions, err := c.vault.GetAllVersions(ctx)
+	// Step 1: Discover annotated resources first to know which paths to poll.
+	resources, err := c.discovery.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("discovering resources: %w", err)
+	}
+	c.logger.Info("discovered annotated resources", "count", len(resources))
+
+	// Step 2: Extract unique vault paths from discovered resources.
+	pathMap := BuildPathToResourceMap(resources)
+	watchedPaths := make([]string, 0, len(pathMap))
+	for p := range pathMap {
+		watchedPaths = append(watchedPaths, p)
+	}
+
+	if len(watchedPaths) == 0 {
+		c.logger.Info("no watched vault paths found, nothing to do")
+		return nil
+	}
+
+	// Step 3: Poll Vault only for watched paths.
+	currentVersions, err := c.vault.GetVersionsForPaths(ctx, watchedPaths)
 	if err != nil {
 		return fmt.Errorf("polling vault versions: %w", err)
 	}
 	c.logger.Info("polled vault versions", "paths", len(currentVersions))
 
-	// Step 2: Load stored state.
+	// Step 4: Load stored state.
 	storedVersions, err := c.state.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("loading stored state: %w", err)
 	}
 	c.logger.Info("loaded stored state", "paths", len(storedVersions))
 
-	// Step 3: Detect changes.
+	// Step 5: Detect changes.
 	changed := DetectChanges(storedVersions, currentVersions)
 
-	// Step 4: If no changes, save current versions and return.
+	// Step 6: If no changes, save current versions and return.
 	if len(changed) == 0 {
 		c.logger.Info("no vault secret changes detected")
 		if err := c.state.Save(ctx, currentVersions); err != nil {
@@ -70,16 +88,6 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			"newVersion", ver,
 		)
 	}
-
-	// Step 5: Discover annotated resources.
-	resources, err := c.discovery.Discover(ctx)
-	if err != nil {
-		return fmt.Errorf("discovering resources: %w", err)
-	}
-	c.logger.Info("discovered annotated resources", "count", len(resources))
-
-	// Step 6: Build path→resource map.
-	pathMap := BuildPathToResourceMap(resources)
 
 	// Step 7: For each changed path, refresh affected resources (deduplicated).
 	// Track paths where at least one resource refresh failed.
@@ -103,7 +111,6 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 			}
 			refreshed[key] = true
 
-			// Step 8: Log errors but continue. Mark the path as failed.
 			if err := c.refresher.Refresh(ctx, resource); err != nil {
 				c.logger.Error("failed to refresh resource",
 					"kind", resource.Kind,
@@ -122,7 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	// Step 9: Merge current versions into stored state, skipping failed paths
+	// Step 8: Merge current versions into stored state, skipping failed paths
 	// so they are retried on the next cycle.
 	mergedVersions := make(map[string]int, len(currentVersions))
 	for k, v := range storedVersions {
