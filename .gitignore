@@ -17,6 +17,8 @@ coverage.html
 
 # Helm packages
 *.tgz
+charts/vaultsync/charts/
+charts/vaultsync/Chart.lock
 
 # OS
 .DS_Store

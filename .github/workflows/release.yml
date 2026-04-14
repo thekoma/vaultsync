@@ -44,6 +44,9 @@ jobs:
           TAG="${{ github.ref_name }}"
           sed -i "s/^version:.*/version: ${TAG}/" charts/vaultsync/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${TAG}\"/" charts/vaultsync/Chart.yaml
+          sed -i "s/tag: \".*\"/tag: \"${TAG}\"/" charts/vaultsync/values.yaml
+      - name: Update chart dependencies
+        run: helm dependency update charts/vaultsync
       - name: Package chart
         run: helm package charts/vaultsync
       - name: Login to GHCR
