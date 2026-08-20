@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/vault/api/auth/kubernetes v0.12.0
 	k8s.io/api v0.35.3
 	k8s.io/apimachinery v0.35.3
-	k8s.io/client-go v0.35.3
+	k8s.io/client-go v1.5.2
 )
 
 require (
