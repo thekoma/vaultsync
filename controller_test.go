@@ -12,17 +12,17 @@ import (
 func TestReconcile(t *testing.T) {
 	// Vault has litellm at version 3 (changed from 2), wasabi-backup at 7, airvpn/qbittorrent at 4.
 	vault := newFakeVaultWatcher(map[string]int{
-		"litellm":             3,
-		"wasabi-backup":       7,
-		"airvpn/qbittorrent":  4,
+		"litellm":            3,
+		"wasabi-backup":      7,
+		"airvpn/qbittorrent": 4,
 	})
 
 	// State has litellm at version 2, wasabi-backup at 7, airvpn/qbittorrent at 4.
 	state := newFakeStateStore()
 	state.versions = map[string]int{
-		"litellm":             2,
-		"wasabi-backup":       7,
-		"airvpn/qbittorrent":  4,
+		"litellm":            2,
+		"wasabi-backup":      7,
+		"airvpn/qbittorrent": 4,
 	}
 
 	// 3 resources:

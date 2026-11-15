@@ -70,7 +70,7 @@ func (s *configMapStateStore) Load(ctx context.Context) (map[string]int, error) 
 		return nil, fmt.Errorf("unmarshaling state data: %w", err)
 	}
 
-	s.logger.Info("loaded state",
+	s.logger.Debug("loaded state",
 		"paths", len(versions),
 	)
 	return versions, nil
