@@ -4,11 +4,17 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 )
 
 // WatchedResource represents a Kubernetes resource that watches one or more Vault secret paths.
@@ -33,6 +39,13 @@ type k8sDiscovery struct {
 	argoCDNamespace string
 	watchAnnotation string
 	logger          *slog.Logger
+
+	// Optional informer-backed listers. When set and synced, Discover reads
+	// from the local cache instead of issuing cluster-wide List calls.
+	secretLister    corelisters.SecretLister
+	configMapLister corelisters.ConfigMapLister
+	secretSynced    cache.InformerSynced
+	configMapSynced cache.InformerSynced
 }
 
 // NewDiscovery creates a Discovery that scans Kubernetes resources for the given watch annotation.
@@ -46,17 +59,101 @@ func NewDiscovery(client kubernetes.Interface, dynClient dynamic.Interface, argo
 	}
 }
 
+// NewInformerDiscovery creates a Discovery backed by shared informers for
+// Secrets and ConfigMaps. Informers are started in the background; until their
+// caches sync, Discover falls back to direct List calls. Object payloads
+// (Secret.Data, ConfigMap.Data) are stripped before caching to keep memory low,
+// since discovery only needs metadata. Requires the "watch" RBAC verb on
+// secrets and configmaps.
+func NewInformerDiscovery(ctx context.Context, client kubernetes.Interface, dynClient dynamic.Interface, argoCDNamespace string, watchAnnotation string, resync time.Duration, logger *slog.Logger) Discovery {
+	d := &k8sDiscovery{
+		client:          client,
+		dynClient:       dynClient,
+		argoCDNamespace: argoCDNamespace,
+		watchAnnotation: watchAnnotation,
+		logger:          logger,
+	}
+	factory := informers.NewSharedInformerFactoryWithOptions(client, resync,
+		informers.WithTransform(stripPayload))
+	secInf := factory.Core().V1().Secrets()
+	cmInf := factory.Core().V1().ConfigMaps()
+	d.secretLister = secInf.Lister()
+	d.configMapLister = cmInf.Lister()
+	d.secretSynced = secInf.Informer().HasSynced
+	d.configMapSynced = cmInf.Informer().HasSynced
+	factory.Start(ctx.Done())
+	return d
+}
+
+// stripPayload drops data fields so the informer cache holds only metadata.
+func stripPayload(obj interface{}) (interface{}, error) {
+	switch o := obj.(type) {
+	case *corev1.Secret:
+		o.Data = nil
+		o.StringData = nil
+		o.ManagedFields = nil
+	case *corev1.ConfigMap:
+		o.Data = nil
+		o.BinaryData = nil
+		o.ManagedFields = nil
+	}
+	return obj, nil
+}
+
+// cacheReady reports whether informer caches can be used.
+func (d *k8sDiscovery) cacheReady() bool {
+	return d.secretLister != nil && d.configMapLister != nil &&
+		d.secretSynced() && d.configMapSynced()
+}
+
+// listSecretsAndConfigMaps returns Secrets and ConfigMaps from the informer
+// cache when synced, otherwise via direct List calls.
+func (d *k8sDiscovery) listSecretsAndConfigMaps(ctx context.Context) ([]*corev1.Secret, []*corev1.ConfigMap, error) {
+	if d.cacheReady() {
+		secrets, err := d.secretLister.List(labels.Everything())
+		if err != nil {
+			return nil, nil, err
+		}
+		cms, err := d.configMapLister.List(labels.Everything())
+		if err != nil {
+			return nil, nil, err
+		}
+		return secrets, cms, nil
+	}
+	if d.secretLister != nil {
+		d.logger.Debug("informer cache not synced, falling back to List")
+	}
+	sl, err := d.client.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	cl, err := d.client.CoreV1().ConfigMaps("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	secrets := make([]*corev1.Secret, len(sl.Items))
+	for i := range sl.Items {
+		secrets[i] = &sl.Items[i]
+	}
+	cms := make([]*corev1.ConfigMap, len(cl.Items))
+	for i := range cl.Items {
+		cms[i] = &cl.Items[i]
+	}
+	return secrets, cms, nil
+}
+
 // Discover scans Secrets, ConfigMaps (all namespaces) and ArgoCD Applications (argocd namespace)
 // for the vaultsync/watch annotation.
 func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) {
 	var resources []WatchedResource
 
-	// Scan Secrets in all namespaces.
-	secrets, err := d.client.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})
+	secrets, configMaps, err := d.listSecretsAndConfigMaps(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range secrets.Items {
+
+	// Scan Secrets in all namespaces.
+	for _, s := range secrets {
 		ann, ok := s.Annotations[d.watchAnnotation]
 		if !ok || ann == "" {
 			continue
@@ -80,11 +177,7 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 	}
 
 	// Scan ConfigMaps in all namespaces.
-	configMaps, err := d.client.CoreV1().ConfigMaps("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for _, cm := range configMaps.Items {
+	for _, cm := range configMaps {
 		ann, ok := cm.Annotations[d.watchAnnotation]
 		if !ok || ann == "" {
 			continue
@@ -144,7 +237,7 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 		}
 	}
 
-	d.logger.Info("discovery complete",
+	d.logger.Debug("discovery complete",
 		"resources", len(resources),
 	)
 

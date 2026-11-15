@@ -9,19 +9,20 @@ import (
 
 // Config holds all configuration for the vaultsync controller.
 type Config struct {
-	VaultAddr        string
-	VaultRole        string
-	VaultMount       string
-	VaultAuthMount   string
-	VaultSkipTLS     bool
-	PollInterval     time.Duration
-	StateNamespace   string
-	StateConfigMap   string
-	ArgoCDNamespace    string
-	DryRun             bool
-	LogLevel           string
-	WatchAnnotation    string
-	TriggerAnnotation  string
+	VaultAddr         string
+	VaultRole         string
+	VaultMount        string
+	VaultAuthMount    string
+	VaultSkipTLS      bool
+	PollInterval      time.Duration
+	StateNamespace    string
+	StateConfigMap    string
+	ArgoCDNamespace   string
+	DryRun            bool
+	LogLevel          string
+	WatchAnnotation   string
+	TriggerAnnotation string
+	UseInformers      bool
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -38,19 +39,20 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		VaultAddr:       addr,
-		VaultRole:       envOr("VAULT_ROLE", "vaultsync"),
-		VaultMount:      envOr("VAULT_MOUNT", "secret"),
-		VaultAuthMount:  envOr("VAULT_AUTH_MOUNT", "kubernetes"),
-		VaultSkipTLS:    envBool("VAULT_SKIP_VERIFY"),
-		PollInterval:    interval,
-		StateNamespace:  envOr("STATE_NAMESPACE", "vaultsync"),
-		StateConfigMap:  envOr("STATE_CONFIGMAP", "vaultsync-state"),
-		ArgoCDNamespace: envOr("ARGOCD_NAMESPACE", "argocd"),
+		VaultAddr:         addr,
+		VaultRole:         envOr("VAULT_ROLE", "vaultsync"),
+		VaultMount:        envOr("VAULT_MOUNT", "secret"),
+		VaultAuthMount:    envOr("VAULT_AUTH_MOUNT", "kubernetes"),
+		VaultSkipTLS:      envBool("VAULT_SKIP_VERIFY"),
+		PollInterval:      interval,
+		StateNamespace:    envOr("STATE_NAMESPACE", "vaultsync"),
+		StateConfigMap:    envOr("STATE_CONFIGMAP", "vaultsync-state"),
+		ArgoCDNamespace:   envOr("ARGOCD_NAMESPACE", "argocd"),
 		DryRun:            envBool("DRY_RUN"),
 		LogLevel:          envOr("LOG_LEVEL", "info"),
 		WatchAnnotation:   envOr("WATCH_ANNOTATION", "vaultsync/watch"),
 		TriggerAnnotation: envOr("TRIGGER_ANNOTATION", "vaultsync/trigger"),
+		UseInformers:      envBool("USE_INFORMERS"),
 	}, nil
 }
 

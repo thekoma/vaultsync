@@ -64,7 +64,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("discovering resources: %w", err)
 	}
-	c.logger.Info("discovered annotated resources", "count", len(resources))
+	c.logger.Debug("discovered annotated resources", "count", len(resources))
 
 	// Step 2: Extract unique vault paths from discovered resources.
 	pathMap := BuildPathToResourceMap(resources)
@@ -74,7 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	if len(watchedPaths) == 0 {
-		c.logger.Info("no watched vault paths found, nothing to do")
+		c.logger.Debug("no watched vault paths found, nothing to do")
 		c.markSuccess()
 		return nil
 	}
@@ -84,14 +84,14 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("polling vault versions: %w", err)
 	}
-	c.logger.Info("polled vault versions", "paths", len(currentVersions))
+	c.logger.Debug("polled vault versions", "paths", len(currentVersions))
 
 	// Step 4: Load stored state.
 	storedVersions, err := c.state.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("loading stored state: %w", err)
 	}
-	c.logger.Info("loaded stored state", "paths", len(storedVersions))
+	c.logger.Debug("loaded stored state", "paths", len(storedVersions))
 
 	// Step 5: Detect changes.
 	changed := DetectChanges(storedVersions, currentVersions)
@@ -115,6 +115,16 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		return nil
 	}
 
+	refreshed := make(map[string]bool)
+	failedPaths := make(map[string]bool)
+	defer func() {
+		c.logger.Info("reconcile complete",
+			"changes", len(changed),
+			"refreshed", len(refreshed),
+			"failedPaths", len(failedPaths),
+		)
+	}()
+
 	// Log detected changes.
 	for path, ver := range changed {
 		oldVer := storedVersions[path]
@@ -127,8 +137,6 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 
 	// Step 7: For each changed path, refresh affected resources (deduplicated).
 	// Track paths where at least one resource refresh failed.
-	refreshed := make(map[string]bool)
-	failedPaths := make(map[string]bool)
 	for path := range changed {
 		affected, ok := pathMap[path]
 		if !ok {
