@@ -6,7 +6,7 @@ Kubernetes controller that bridges HashiCorp Vault secret changes to ArgoCD-mana
 ## Tech stack
 - Go 1.26, no framework (plain client-go)
 - HashiCorp Vault API (`github.com/hashicorp/vault/api`) with Kubernetes auth
-- Kubernetes client-go (typed + dynamic)
+- Kubernetes client-go: typed, metadata (Application discovery reads only metadata), dynamic (Application patching)
 - Helm chart using bjw-s-labs/app-template as dependency
 - CalVer versioning (YYYY.MM.MICRO)
 
