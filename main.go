@@ -13,6 +13,7 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 )
 
@@ -64,6 +65,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	metaClient, err := metadata.NewForConfig(restCfg)
+	if err != nil {
+		logger.Error("failed to create metadata client", "error", err)
+		os.Exit(1)
+	}
+
 	// 5. Signal handling (needed early for vault init context).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -79,9 +86,9 @@ func main() {
 	state := NewStateStore(k8sClient, *cfg, logger)
 	var discovery Discovery
 	if cfg.UseInformers {
-		discovery = NewInformerDiscovery(ctx, k8sClient, dynClient, cfg.ArgoCDNamespace, cfg.WatchAnnotation, 0, logger)
+		discovery = NewInformerDiscovery(ctx, k8sClient, metaClient, cfg.ArgoCDNamespace, cfg.WatchAnnotation, 0, logger)
 	} else {
-		discovery = NewDiscovery(k8sClient, dynClient, cfg.ArgoCDNamespace, cfg.WatchAnnotation, logger)
+		discovery = NewDiscovery(k8sClient, metaClient, cfg.ArgoCDNamespace, cfg.WatchAnnotation, logger)
 	}
 	refresher := NewRefresher(k8sClient, dynClient, *cfg, logger)
 	controller := NewController(vault, state, discovery, refresher, logger)

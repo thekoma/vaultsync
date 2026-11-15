@@ -10,10 +10,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -33,9 +33,11 @@ type Discovery interface {
 }
 
 // k8sDiscovery implements Discovery by scanning Secrets, ConfigMaps, and ArgoCD Applications.
+// Applications are listed through metaClient as PartialObjectMetadata: discovery
+// only reads annotations, so the API server leaves out spec and status.
 type k8sDiscovery struct {
 	client          kubernetes.Interface
-	dynClient       dynamic.Interface
+	metaClient      metadata.Interface
 	argoCDNamespace string
 	watchAnnotation string
 	logger          *slog.Logger
@@ -49,10 +51,10 @@ type k8sDiscovery struct {
 }
 
 // NewDiscovery creates a Discovery that scans Kubernetes resources for the given watch annotation.
-func NewDiscovery(client kubernetes.Interface, dynClient dynamic.Interface, argoCDNamespace string, watchAnnotation string, logger *slog.Logger) Discovery {
+func NewDiscovery(client kubernetes.Interface, metaClient metadata.Interface, argoCDNamespace string, watchAnnotation string, logger *slog.Logger) Discovery {
 	return &k8sDiscovery{
 		client:          client,
-		dynClient:       dynClient,
+		metaClient:      metaClient,
 		argoCDNamespace: argoCDNamespace,
 		watchAnnotation: watchAnnotation,
 		logger:          logger,
@@ -65,10 +67,10 @@ func NewDiscovery(client kubernetes.Interface, dynClient dynamic.Interface, argo
 // (Secret.Data, ConfigMap.Data) are stripped before caching to keep memory low,
 // since discovery only needs metadata. Requires the "watch" RBAC verb on
 // secrets and configmaps.
-func NewInformerDiscovery(ctx context.Context, client kubernetes.Interface, dynClient dynamic.Interface, argoCDNamespace string, watchAnnotation string, resync time.Duration, logger *slog.Logger) Discovery {
+func NewInformerDiscovery(ctx context.Context, client kubernetes.Interface, metaClient metadata.Interface, argoCDNamespace string, watchAnnotation string, resync time.Duration, logger *slog.Logger) Discovery {
 	d := &k8sDiscovery{
 		client:          client,
-		dynClient:       dynClient,
+		metaClient:      metaClient,
 		argoCDNamespace: argoCDNamespace,
 		watchAnnotation: watchAnnotation,
 		logger:          logger,
@@ -200,13 +202,13 @@ func (d *k8sDiscovery) Discover(ctx context.Context) ([]WatchedResource, error) 
 		)
 	}
 
-	// Scan ArgoCD Applications in the argocd namespace using the dynamic client.
+	// Scan ArgoCD Applications in the argocd namespace, metadata only.
 	appGVR := schema.GroupVersionResource{
 		Group:    "argoproj.io",
 		Version:  "v1alpha1",
 		Resource: "applications",
 	}
-	apps, err := d.dynClient.Resource(appGVR).Namespace(d.argoCDNamespace).List(ctx, metav1.ListOptions{})
+	apps, err := d.metaClient.Resource(appGVR).Namespace(d.argoCDNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		d.logger.Warn("failed to list ArgoCD applications, skipping",
 			"error", err,
