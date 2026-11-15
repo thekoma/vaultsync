@@ -90,7 +90,8 @@ app-template:
         rules:
           - apiGroups: [""]
             resources: ["secrets", "configmaps"]
-            verbs: ["get", "list", "patch"]
+            # "watch" is only used with USE_INFORMERS=true.
+            verbs: ["get", "list", "watch", "patch"]
           - apiGroups: [""]
             resources: ["configmaps"]
             verbs: ["create", "update"]

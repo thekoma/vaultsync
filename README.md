@@ -197,7 +197,7 @@ All configuration is via Helm values (which map to environment variables):
 | `controller.logLevel` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `controller.watchAnnotation` | `WATCH_ANNOTATION` | `vaultsync/watch` | Annotation key used to discover watched resources |
 | `controller.triggerAnnotation` | `TRIGGER_ANNOTATION` | `vaultsync/trigger` | Annotation key used for the drift-trigger patch |
-| (env only) | `USE_INFORMERS` | `false` | Use shared informers (metadata-only cache) for Secret/ConfigMap discovery instead of a cluster-wide List every cycle. Requires the `watch` RBAC verb on secrets and configmaps |
+| (env only) | `USE_INFORMERS` | `false` | Use shared informers (metadata-only cache) for Secret/ConfigMap discovery instead of a cluster-wide List every cycle. Requires the `watch` RBAC verb on secrets and configmaps, which the chart's ClusterRole grants |
 | `state.namespace` | `STATE_NAMESPACE` | Release namespace | Namespace for the state ConfigMap |
 | `state.configMap` | `STATE_CONFIGMAP` | `vaultsync-state` | Name of the state ConfigMap |
 | `image.repository` | -- | `ghcr.io/thekoma/vaultsync` | Container image repository |
