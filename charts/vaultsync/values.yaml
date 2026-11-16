@@ -10,7 +10,7 @@ app-template:
         main:
           image:
             repository: ghcr.io/thekoma/vaultsync
-            tag: "2026.4.4"
+            tag: "2026.11.3"
             pullPolicy: IfNotPresent
           env:
             VAULT_ADDR:
